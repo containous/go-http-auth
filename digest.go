@@ -65,7 +65,7 @@ func (c digest_cache) Swap(i, j int) {
 }
 
 /*
- Purge remove count oldest entries from DigestAuth.clients
+ Remove count oldest entries from DigestAuth.clients
 */
 func (a *DigestAuth) Purge(count int) {
 	a.mutex.Lock()
@@ -98,14 +98,12 @@ func (a *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request) {
 	a.clients[nonce] = &digest_client{nc: 0, last_seen: time.Now().UnixNano()}
 	a.mutex.Unlock()
 
-	a.mutex.RLock()
 	w.Header().Set(contentType, a.Headers.V().UnauthContentType)
 	w.Header().Set(a.Headers.V().Authenticate,
 		fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", algorithm="MD5", qop="auth"`,
 			a.Realm, nonce, a.Opaque))
 	w.WriteHeader(a.Headers.V().UnauthCode)
 	w.Write([]byte(a.Headers.V().UnauthResponse))
-	a.mutex.RUnlock()
 }
 
 /*
@@ -254,6 +252,7 @@ func (a *DigestAuth) JustCheck(wrapped http.HandlerFunc) http.HandlerFunc {
 // NewContext returns a context carrying authentication information for the request.
 func (a *DigestAuth) NewContext(ctx context.Context, r *http.Request) context.Context {
 	a.mutex.Lock()
+	defer a.mutex.Unlock()
 	username, authinfo := a.CheckAuth(r)
 	info := &Info{Username: username, ResponseHeaders: make(http.Header)}
 	if username != "" {
@@ -270,7 +269,6 @@ func (a *DigestAuth) NewContext(ctx context.Context, r *http.Request) context.Co
 			fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", algorithm="MD5", qop="auth"`,
 				a.Realm, nonce, a.Opaque))
 	}
-	a.mutex.Unlock()
 	return context.WithValue(ctx, infoKey, info)
 }
 
