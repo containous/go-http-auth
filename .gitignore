@@ -3,3 +3,4 @@
 *.6
 *.out
 _testmain.go
+.idea/
