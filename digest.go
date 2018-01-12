@@ -68,8 +68,6 @@ func (c digest_cache) Swap(i, j int) {
  Remove count oldest entries from DigestAuth.clients
 */
 func (a *DigestAuth) Purge(count int) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
 	entries := make([]digest_cache_entry, 0, len(a.clients))
 	for nonce, client := range a.clients {
 		entries = append(entries, digest_cache_entry{nonce, client.last_seen})
@@ -86,17 +84,15 @@ func (a *DigestAuth) Purge(count int) {
  (or requires reauthentication).
 */
 func (a *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request) {
-	a.mutex.RLock()
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 	if len(a.clients) > a.ClientCacheSize+a.ClientCacheTolerance {
 		a.Purge(a.ClientCacheTolerance * 2)
 	}
-	a.mutex.RUnlock()
 
 	nonce := RandomKey()
 
-	a.mutex.Lock()
 	a.clients[nonce] = &digest_client{nc: 0, last_seen: time.Now().UnixNano()}
-	a.mutex.Unlock()
 
 	w.Header().Set(contentType, a.Headers.V().UnauthContentType)
 	w.Header().Set(a.Headers.V().Authenticate,
