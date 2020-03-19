@@ -86,7 +86,9 @@ func (da *DigestAuth) Purge(count int) {
 
 // RequireAuth is an http.HandlerFunc which initiates the
 // authentication process (or requires reauthentication).
-func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request) {
+// if stale, the stale=true flag is added to the response
+// header.
+func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request, stale bool) {
 	da.mutex.RLock()
 	clientsLen := len(da.clients)
 	da.mutex.RUnlock()
@@ -102,9 +104,15 @@ func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request) {
 
 	da.mutex.RLock()
 	w.Header().Set(contentType, da.Headers.V().UnauthContentType)
-	w.Header().Set(da.Headers.V().Authenticate,
-		fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", algorithm=MD5, qop="auth"`,
-			da.Realm, nonce, da.Opaque))
+	var digest string
+	if stale {
+		digest = fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", stale="true", algorithm="MD5", qop="auth"`,
+			da.Realm, nonce, da.Opaque)
+	} else {
+		digest = fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", algorithm="MD5", qop="auth"`,
+			da.Realm, nonce, da.Opaque)
+	}
+	w.Header().Set(da.Headers.V().Authenticate, digest)
 	w.WriteHeader(da.Headers.V().UnauthCode)
 	w.Write([]byte(da.Headers.V().UnauthResponse))
 	da.mutex.RUnlock()
@@ -126,6 +134,8 @@ func DigestAuthParams(authorization string) map[string]string {
 // data. Returns a pair of username, authinfo, where username is the
 // name of the authenticated user or an empty string and authinfo is
 // the contents for the optional Authentication-Info response header.
+// If the authentication is valid, but the session is stale,
+// CheckAuth returns "", &"stale".
 func (da *DigestAuth) CheckAuth(r *http.Request) (username string, authinfo *string) {
 	da.mutex.RLock()
 	defer da.mutex.RUnlock()
@@ -195,8 +205,19 @@ func (da *DigestAuth) CheckAuth(r *http.Request) (username string, authinfo *str
 	if !ok {
 		return "", nil
 	}
-	if client.nc != 0 && client.nc >= nc && !da.IgnoreNonceCount {
-		return "", nil
+
+	lastSeenNc := client.nc
+	if lastSeenNc != 0 && !da.IgnoreNonceCount {
+		if nc == lastSeenNc {
+			// replay attack
+			return "", nil
+		} else if nc < lastSeenNc {
+			// out of order pipelined requests, so let them know they are stale. The browser
+			// can then retry with the same credentials, without having to prompt the user
+			// again.
+			stale := "stale"
+			return "", &stale
+		}
 	}
 	client.nc = nc
 	client.lastSeen = time.Now().UnixNano()
@@ -223,7 +244,11 @@ const (
 func (da *DigestAuth) Wrap(wrapped AuthenticatedHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if username, authinfo := da.CheckAuth(r); username == "" {
-			da.RequireAuth(w, r)
+			if authinfo != nil && *authinfo == "stale" {
+				da.RequireAuth(w, r, true)
+				return
+			}
+			da.RequireAuth(w, r, false)
 		} else {
 			ar := &AuthenticatedRequest{Request: *r, Username: username}
 			if authinfo != nil {
