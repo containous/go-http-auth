@@ -104,14 +104,11 @@ func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request, stale 
 
 	da.mutex.RLock()
 	w.Header().Set(contentType, da.Headers.V().UnauthContentType)
-	var digest string
+	digest := fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", `, da.Realm, nonce, da.Opaque)
 	if stale {
-		digest = fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", stale="true", algorithm="MD5", qop="auth"`,
-			da.Realm, nonce, da.Opaque)
-	} else {
-		digest = fmt.Sprintf(`Digest realm="%s", nonce="%s", opaque="%s", algorithm="MD5", qop="auth"`,
-			da.Realm, nonce, da.Opaque)
+		digest += `stale="true", `
 	}
+	digest += `algorithm="MD5", qop="auth"`
 	w.Header().Set(da.Headers.V().Authenticate, digest)
 	w.WriteHeader(da.Headers.V().UnauthCode)
 	w.Write([]byte(da.Headers.V().UnauthResponse))
@@ -211,7 +208,8 @@ func (da *DigestAuth) CheckAuth(r *http.Request) (username string, authinfo *str
 		if nc == lastSeenNc {
 			// replay attack
 			return "", nil
-		} else if nc < lastSeenNc {
+		}
+		if nc < lastSeenNc {
 			// out of order pipelined requests, so let them know they are stale. The browser
 			// can then retry with the same credentials, without having to prompt the user
 			// again.
