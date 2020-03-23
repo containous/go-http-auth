@@ -84,11 +84,20 @@ func (da *DigestAuth) Purge(count int) {
 	}
 }
 
+// RequireAuthStale is an http.HandlerFunc which initiates the
+// authentication process (or requires reauthentication,
+// with the stale=true flag added to the response header).
+func (da *DigestAuth) RequireAuthStale(w http.ResponseWriter, r *http.Request) {
+	da.requireAuth(w, r, true)
+}
+
 // RequireAuth is an http.HandlerFunc which initiates the
 // authentication process (or requires reauthentication).
-// if stale, the stale=true flag is added to the response
-// header.
-func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request, stale bool) {
+func (da *DigestAuth) RequireAuth(w http.ResponseWriter, r *http.Request) {
+	da.requireAuth(w, r, false)
+}
+
+func (da *DigestAuth) requireAuth(w http.ResponseWriter, r *http.Request, stale bool) {
 	da.mutex.RLock()
 	clientsLen := len(da.clients)
 	da.mutex.RUnlock()
@@ -243,10 +252,10 @@ func (da *DigestAuth) Wrap(wrapped AuthenticatedHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if username, authinfo := da.CheckAuth(r); username == "" {
 			if authinfo != nil && *authinfo == "stale" {
-				da.RequireAuth(w, r, true)
+				da.RequireAuthStale(w, r)
 				return
 			}
-			da.RequireAuth(w, r, false)
+			da.RequireAuth(w, r)
 		} else {
 			ar := &AuthenticatedRequest{Request: *r, Username: username}
 			if authinfo != nil {
