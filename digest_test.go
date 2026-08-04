@@ -64,6 +64,16 @@ func TestAuthDigest(t *testing.T) {
 	if u, _ := da.CheckAuth(r); u != "test" {
 		t.Fatal("empty auth for valid request in subpath")
 	}
+
+	// "unknown" is absent from test.htdigest, so the provider returns "". The
+	// response below is forged against an empty HA1: without the empty-secret
+	// guard in CheckAuth this would authenticate a non-existent user.
+	r.URL, _ = url.Parse("/t2")
+	da.clients["Vb9BP/h81n3GpTTB"] = &digestClient{nc: 0, lastSeen: time.Now().UnixNano()}
+	r.Header.Set("Authorization", `Digest username="unknown", realm="example.com", nonce="Vb9BP/h81n3GpTTB", uri="/t2", cnonce="NjE4MTM2", nc=00000001, qop="auth", response="435eb9f4b89bd8b8a46201cd6b26e543", opaque="U7H+ier3Ae8Skd/g", algorithm=MD5`)
+	if u, _ := da.CheckAuth(r); u != "" {
+		t.Fatal("non-empty auth for unknown user")
+	}
 }
 
 func TestDigestAuthParams(t *testing.T) {
